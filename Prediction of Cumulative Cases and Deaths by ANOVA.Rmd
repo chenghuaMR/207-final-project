@@ -1,0 +1,319 @@
+---
+title: "Prediction of Cumulative Cases and Deaths by ANOVA"
+Author: "Ran Ma 920234765" 
+date: "2022/03/14"
+output: html_document
+---
+
+```{r setup, include = FALSE,message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(out.width = '100%', fig.align = 'center', echo = TRUE)
+knitr::opts_knit$set(root.dir = "C:\\Users\\RanMa\\Desktop\\UC Davis\\2022winter\\207\\project\\")
+
+```
+
+<span style='color:blue'>
+Note that the report is only an incomplete version of final report. I followed my roadmap showed in progress report.
+</span> 
+
+
+# 1. Introduction
+
+COVID-19 (coronavirus disease 2019) is a disease caused by a virus named SARS-CoV-2 and was first discovered in December 2019 in Wuhan, China. COVID-19 most often causes respiratory symptoms that can feel much like a cold, a flu, or pneumonia. COVID-19 may attack more than your lungs and respiratory system. Other parts of your body may also be affected by the disease.[1]
+
+Like many other respiratory viruses, coronaviruses spread quickly through droplets that you project out of your mouth or nose when you breathe, cough, sneeze, or speak[1]. It is very contagious and has quickly spread around the world. As of 13rd March 2022, over 440 million confirmed cases and over 5.9 million deaths have been reported globally. 
+
+In this case, getting to know how will things go in the future is meaningful to the real world. Although the new confirmed cases would be influenced by many other reasons, such as the epidemic prevention policy, the appearance of new variant of virus, etc. 
+
+That leads to the questions of interests, which are mainly discussed and evaluated in this project. Can we derive a model to predict the number of cumulative cases and cumulative deaths? Note that cause things are significantly different in different countries, so only cases in US are predicted.
+
+
+# 2. Background
+## 2.1 Dataset
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, results = 'hide'}
+library(tidyverse)
+library(gridExtra)
+library(scales)
+library(lubridate)
+library(ggplot2)
+library(tseries)
+library(forecast)
+library(zoo)
+```
+
+
+```{r, warning = FALSE, message = FALSE, echo = FALSE}
+covid <- read_csv("https://covid19.who.int/WHO-COVID-19-global-data.csv")
+str(covid)
+range(covid$Date_reported)
+length(unique(covid$Country))
+```
+
+This data set is maintained by WHO and updated constantly. It contains 189420 recordings of 8 variables. `Date_reported` indicates the date when the data was collected, from 01/03/2020 to 03/12/2022. 3 variables are categorical ones (`Country_code`,`Country` and `WHO_region`), indicating the geographic information. There're information of 237 countries in this dataset ("other" included). Specifically, for `WHO_region`, "EMRO" is short for Eastern Mediterranean, "EURO" is short for Europe, "AFRO" is short for Africa, "WPRO" is short for Western Pacific, "AMRO" is short for Amricas, "SEARO" is short for South-East Asia.
+
+Another 4 variables are Quantitative ones, indicating the number of new cases, cumulative cases, new deaths and cumulative deaths. 
+
+
+```{r, warning = FALSE, message = FALSE,echo = FALSE}
+knitr::kable(tail(covid[which(covid$Country_code == "US"),],7))
+```
+
+
+The table above shows the numbers of cases at last week in US.
+
+
+## 2.2 Methodology
+
+### ARIMA model
+ARIMA model, short for autoregressive integrated moving average model, is one of the most widely used method in time series field. ARIMA modelis a generalization of an autoregressive moving average (i.e. ARMA) model. 
+
+For better understanding, ARIMA model could be think of three parts, "AR", "MA" and "I". The "AR" (for "autoregressive") part indicates that the evolving variable of interest is regressed on its own lagged (i.e., prior) values. The "MA" (for "moving average") part indicates that the regression error is actually a linear combination of error terms whose values occurred contemporaneously and at various times in the past. The "I" (for "integrated") indicates that the data values have been replaced with the difference between their values and the previous values (and this differencing process may have been performed more than once). The purpose of each of these features is to make the model fit the data as well as possible. [2] 
+
+In this case, if we combine differencing with autoregression and a moving average model, we obtain a non-seasonal ARIMA model. The full model of ARIMA(p,d,q) can be written as:
+
+$$ 
+y_t\prime = c + \phi_ty_{t-1}\prime + \cdots + \phi_py_{t-p}\prime + \theta_1\varepsilon_{t-1} + \theta_q\varepsilon_{t-q} + \theta_t
+$$
+where $y_t\prime$ is the differenced series (it may have been differenced more than once). The “predictors” on the right hand side include both lagged values of $y_t$ and lagged errors.
+
+In the ARIMA(p,d,q) model above, p indicates the order of the autoregressive part, q indicates the order of the moving average part, while d indicates degree of first differencing involved[3].
+
+
+#3. Descriptive Analysis
+
+First of all, major summary statistics are calculated:
+
+For the number of new cases in each region:
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+tapply(covid$New_cases, covid$WHO_region, summary)
+```
+
+For the number of new deaths in each region: 
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+tapply(covid$New_deaths, covid$WHO_region, summary)
+```
+
+Note that, calculate the minimum, maximum, mean and other summary statistics of cumulative cases and cumulative deaths do not have real-world meaning. Because those two numbers are cumulated, so the minimum must be 0 and the maximum is the most recent records.
+
+Now a heatmap is drawed[4] to show the most recent cases, to let my readers have a better view of the whole dataset.
+
+
+```{r, warning = FALSE, echo = FALSE, message = FALSE}
+library(maps)
+
+world = map_data("world");
+# worldplot = ggplot() + geom_polygon(data = world, aes(x=long, y = lat, group = group))
+# setdiff(unique(covid.today$Country),unique(world$region))
+
+covid[which(covid$Country == 'United States of America'),]$Country = 'USA'
+covid[which(covid$Country == 'Bolivia (Plurinational State of)'),]$Country = 'Bolivia'
+covid[which(covid$Country == 'Brunei Darussalam'),]$Country = 'Brunei'
+covid[which(covid$Country == 'Cabo Verde'),]$Country = 'Cape Verde'
+covid[which(covid$Country == 'Curaçao'),]$Country = 'Curacao'
+covid[which(covid$Country == 'Czechia'),]$Country = 'Czech Republic'
+covid[which(covid$Country == 'Falkland Islands (Malvinas)'),]$Country = 'Falkland Islands'
+covid[which(covid$Country == 'Iran (Islamic Republic of)'),]$Country = 'Iran'
+covid[which(covid$Country == 'Kosovo[1]'),]$Country = 'Kosovo'
+covid[which(covid$Country == "Lao People's Democratic Republic"),]$Country = 'Laos'
+covid[which(covid$Country == "Micronesia (Federated States of)"),]$Country = 'Micronesia'
+covid[which(covid$Country == "Northern Mariana Islands (Commonwealth of the)"),]$Country = 'Northern Mariana Islands'
+covid[which(covid$Country == "Réunion"),]$Country = 'Reunion'
+covid[which(covid$Country == "Russian Federation"),]$Country = 'Russia'
+covid[which(covid$Country == "Saint Barthélemy"),]$Country = 'Saint Barthelemy'
+covid[which(covid$Country == "Saint Kitts and Nevis"),]$Country = 'Saint Kitts'
+covid[which(covid$Country == "Saint Vincent and the Grenadines"),]$Country = 'Saint Vincent'
+covid[which(covid$Country == "Republic of Korea"),]$Country = 'South Korea'
+covid[which(covid$Country == "Syrian Arab Republic"),]$Country = 'Syrian'
+covid[which(covid$Country == "The United Kingdom"),]$Country = 'UK'
+covid[which(covid$Country == "Trinidad and Tobago"),]$Country = 'Tobago'
+covid[which(covid$Country == "United Republic of Tanzania"),]$Country = 'Tanzania'
+covid[which(covid$Country == "United States Virgin Islands"),]$Country = 'Virgin Islands'
+covid[which(covid$Country == "Venezuela (Bolivarian Republic of)"),]$Country = 'Venezuela'
+covid[which(covid$Country == "Viet Nam"),]$Country = 'Vietnam'
+covid[which(covid$Country == "Democratic People's Republic of Korea"),]$Country = 'North Korea'
+covid[which(covid$Country == "Republic of Moldova"),]$Country = 'Moldova'
+covid[which(covid$Country == "Holy See"),]$Country = 'Vatican'
+
+
+covid.today = covid %>% 
+  filter(Date_reported == "2022-03-11") %>% 
+  mutate(region=Country)
+
+covid.today$ratio = covid.today$New_cases
+
+covid.today.world = inner_join(world, covid.today, by = "region")
+
+fig.map  <- ggplot() +
+  geom_polygon(data = covid.today.world, aes(x=long, y = lat, group = group,fill=New_deaths)) + 
+  coord_fixed(1.3)
+fig.map
+
+fig.map2  <- ggplot() +
+  geom_polygon(data = covid.today.world, aes(x=long, y = lat, group = group,fill=New_cases)) + 
+  coord_fixed(1.3)
+fig.map2
+
+```
+
+
+To draw the map, note that several countries in the WHO dataset are different from those in the World dataset, which caused by different names (eg. "United States of America" V.S. "USA", "Republic of Korea" V.S. "South Korea"). This error is manually checked and modified for showing the absolute value of the number of new_deaths and new_cases.
+
+The ideal situation would be show how things going in 237 countries respectively, but that would be redundant to show in the report. Juto to offer an insight, I'll take a few countries for example[6]. 
+
+```{r, warning = FALSE, echo = FALSE, message = FALSE}
+covid_selectcountries = covid %>%
+  dplyr::filter(Country %in% c("China","USA","UK","India", "Russia")) %>%
+  group_by(Date_reported, Country) %>%
+  summarise(Cases = sum(Cumulative_cases), Deaths = sum(Cumulative_deaths))
+
+select_countries = gather(covid_selectcountries, event, total, Cases:Deaths) 
+knitr::kable(tail(covid_selectcountries))
+
+ggplot(select_countries, aes(Country, total/1000, fill=event)) + 
+  geom_bar(stat = "identity", position = 'dodge') + 
+  labs(x="Country",y="number per day per hundred") + 
+  ggtitle("Cases vs Deaths")
+
+```
+
+From the box plot above, we noticed that the number of new deaths is significantly smaller than the number of new cases.
+
+Now, I showed how things are going in US with respect of time.
+
+Since the maginitude of `cumulative_cases` is different from that of `cumulative_deaths`, to have a clearer plot, I rescaled the `cumulative_cases` by calculating the numbers per million (divide by 1000000), whereas rescaling the `cumulative_deaths` by dividing by one hundred thousand (i.e. 100000). The plot is showed below.
+
+```{r, warning = FALSE, echo = FALSE, message = FALSE}
+covidCummulativeData_US = covid[which(covid$Country == "USA"),] %>%
+  group_by(Date_reported) %>%
+  summarise(Cases = sum(Cumulative_cases), Deaths = sum(Cumulative_deaths))
+
+ggplot(covidCummulativeData_US, aes(Date_reported)) + 
+  geom_line(aes(y = Cases/1000000, colour = "Cumulative Cases(Million)")) + 
+  geom_line(aes(y = Deaths/100000, colour = "Cumulative Deaths(100 thousand)")) + 
+  labs(x = 'Date since 01/03/2022', y = 'Count') +
+  ggtitle("Covid-19 Cumulative confirmed and death with Date")
+```
+
+The cumulative number of cases and deathes continuously rising in USA, that is logical. We also noticed that there have been a few surge happened (around 2020-12, 2021-08, and 2022-01). Through checking other resources, we confirmed that in those time points, new variant of COVID-19 viras appeared.
+
+Also, from this plot, we can clearly see that the time series for cumulative cases and cumulative deaths are not stationary time series, which will be discussed more in detail in next part.
+
+
+#4. Predictive Analysis
+
+At this part, we fitted cumulative cases and cumulative deaths by ARIMA model seperately.
+
+First of all, since the time series is not stationary, differencing was conducted. Secondly, the whole dataset was divided to training set and test set. Training set is used for fitting the model, and test set is used for evaluate the model's predictive performance[5]. Note that instead of randomly divided the whole dataset to training and test, we use the last one month's data as test (from 02/12/2022 to 03/12/2022) set, and others as training set. Accuracy of the two model were also calculated. 
+
+
+
+```{r, warning = FALSE, echo = FALSE, message = FALSE}
+co_usa_c = covid[which(covid$Country == "USA"),c("Date_reported", "Cumulative_cases")]
+co_usa_d = covid[which(covid$Country == "USA"),c("Date_reported", "Cumulative_deaths")]
+
+adf.test(co_usa_c$Cumulative_cases, alternative="stationary", k=0)
+adf.test(co_usa_d$Cumulative_deaths, alternative="stationary", k=0)
+
+par(mfrow=c(2,2))
+acf(co_usa_c$Cumulative_cases)
+pacf(co_usa_c$Cumulative_cases)
+
+acf(co_usa_d$Cumulative_deaths)
+pacf(co_usa_d$Cumulative_deaths)
+
+```
+
+To test whether the dataset is stationary, the Augmented Dickey-Fuller Test is conducted[7]. We obtained p-value $>0.05$ for both cumulative cases and cumulative deaths, indicating the data is not stationary and extra transformation is needed. The acf and pacf graphs also confirmed this.
+
+```{r, warning = FALSE, echo = FALSE, message = FALSE}
+co_usa_c_diff = ts(diff(co_usa_c$Cumulative_cases, differences=2))
+co_usa_d_diff = ts(diff(co_usa_d$Cumulative_deaths, differences=2))
+
+adf.test(co_usa_c_diff, alternative = "stationary", k = 0)
+adf.test(co_usa_d_diff, alternative = "stationary", k = 0)
+
+```
+
+After conducting second-order difference, ADF test is conducted again, and this time, both $p < 0.05$, we can reject the null hypothesis that the data is not stationary.
+
+```{r, warning = FALSE, echo = FALSE, message = FALSE}
+ArimaFit1 = auto.arima(head(ts(co_usa_c$Cumulative_cases),-28), d = 2)
+ArimaFit1
+accuracy(ArimaFit1)
+
+Arima1For = forecast(ArimaFit1, h = 28)
+autoplot(Arima1For)
+
+```
+
+The number of cumulative cases was fitted as ARIMA(5,2,2). AIC, BIC for this optimal model were also calculated. Accuracy and forecast plot also showed above.
+
+
+```{r, warning = FALSE, echo = FALSE, message = FALSE}
+ArimaFit2 = auto.arima(head(ts(co_usa_d$Cumulative_deaths),-28), d = 2)
+ArimaFit2
+accuracy(ArimaFit2)
+
+Arima2For = forecast(ArimaFit2, h = 28)
+autoplot(Arima2For)
+```
+
+The number of cumulative deaths was fitted as ARIMA(3,2,2). AIC, BIC for this optimal model were also calculated. Accuracy and forecast plot also showed above.
+
+
+# 5. Sensitive Analysis
+
+We have finished fitting the two time series to ANOVA models respectively in last part. In this part, key assumptions are needed to be verified.
+
+Note that, one key assupmtion for applying ANOVA model is that the time series is needed to be stationary. This has already been examined at last part by ADF test. Cause logically, ADF test should be conducted seeing if differencing is needed.
+
+So in this part, we focus on the properties of residuals.
+
+
+```{r, warning = FALSE, echo = FALSE, message = FALSE}
+checkresiduals(ArimaFit1)
+checkresiduals(ArimaFit2)
+```
+  
+From residuals plot, we can see that the residuals seem to be normally distributed with mean zero, but from Box-Ljung test, both residuals series from two models don't follow Gaussian white noise (GWN), indicating that there's still useful information in the residuals. We can roughly identified the problem appears due to non-constant variance of residuals.
+
+
+# 6. Conclusions and Prospects
+
+After differencing the original time series for cumulative cases and cumulative deaths, two ARIMA model were fitted. When only predicting 28 days, the trend of the forecast line seems reasonable, but the accuracy is not that good. To identify the possible reasons, sensitive analysis was conducted, it turned out that although the residuals have mean 0, they don't have constant variance. 
+
+From the respect of casual effects, using historical data to predict future cases is reasonable and reliable. However, the number of cases don't only depend on the historical numbers. Take cumulative cure cases for example, it also depends on environment and individual. Vaccinated or not, masks or not, the density of population, and even the health condition of individuals would affect the results.
+
+In conclusion, this project only presents an idea for predicting how things going for the whole country of United States of America. Further, to improve the accuracy, and to acquire a more delicated result, a few steps could be taken.
+
+1. Additional datasets could be introduced, for example, by using the numbers of different states, even different cities, the forecast could be more delicated. 
+
+2. Instead of only applying the historical numbers, other information, such as masks or not, vaccinated or not, the density of population, the appearance of new variant,..., such information could also be applied. In this case, instead of applying ANOMA model, VAR model could be considered.
+
+
+## Acknowledge
+1. Centers for Disease Control and Prevention. (n.d.). Basics of covid-19. Centers for Disease Control and Prevention. Retrieved March 4, 2022, from https://www.cdc.gov/coronavirus/2019-ncov/your-health/about-covid-19/basics-covid-19.html 
+
+2.Wikimedia Foundation. (2022, February 5). Autoregressive integrated moving average. Wikipedia. Retrieved March 4, 2022, from https://en.wikipedia.org/wiki/Autoregressive_integrated_moving_average 
+
+3. Forecasting: Principles&nbsp;and&nbsp;practice (2nd ed). OTexts. (n.d.). Retrieved March 4, 2022, from https://otexts.com/fpp2/index.html 
+4. ChenShizhe. (n.d.). Chenshizhe/COVID-19-course-project. GitHub. Retrieved March 4, 2022, from https://github.com/ChenShizhe/Covid-19-course-project 
+
+5. Forecasting: Method and Practice. 12.8  Training and Test Set Predictions. (n.d.). Retrieved March 4, 2022, from https://otexts-com.translate.goog/fppcn/forecasting-on-training-and-test-sets.html?_x_tr_sl=zh-CN&amp;_x_tr_tl=en&amp;_x_tr_hl=en&amp;_x_tr_pto=sc 
+
+6. Dktalaicha. (2020, April 11). Covid-19 forecasting Week 4 - Arima. Kaggle. Retrieved March 14, 2022, from https://www.kaggle.com/dktalaicha/covid-19-forecasting-week-4-arima/notebook 
+
+7. Wikimedia Foundation. (2022, March 13). Autoregressive integrated moving average. Wikipedia. Retrieved March 13, 2022, from https://en.wikipedia.org/wiki/Augmented_Dickey%E2%80%93Fuller_test
+
+## Appendix
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+
+```
+
+## Session information {-}
+```{r}
+sessionInfo()
+```
+
